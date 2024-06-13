@@ -1,4 +1,5 @@
 use std::{env, thread};
+use std::any::Any;
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::str::FromStr;
@@ -104,6 +105,7 @@ fn main() -> Result<()> {
         let packet = rx.recv().unwrap();
 
         if last_timeout.elapsed().as_secs() > 30 {
+            debug!("clear old peers");
             last_timeout = Instant::now();
             peers.retain(|_, p| p.last_activity.elapsed().as_secs() < 60);
         }
@@ -114,10 +116,13 @@ fn main() -> Result<()> {
 
                 local_tx.send_to(packet.packet(), None);
 
-                peers.insert(packet.get_source(), Peer {
+                if peers.insert(packet.get_source(), Peer {
                     endpoint: addr,
                     last_activity: Instant::now(),
-                });
+                }).is_none() {
+                    debug!(endpoint = ?addr, mac_addr = ?packet.get_source(), "new peer");
+                    debug!(peers = ?peers.keys().collect::<Vec<_>>());
+                }
             }
             Packet::Local(packet) => {
                 let peers: Vec<_> = if packet.get_destination().is_broadcast() {
