@@ -71,29 +71,11 @@
               ExecStart = "${packages.default}/bin/qemu-network-server";
               Restart = "on-failure";
 
-              AmbientCapabilities = "CAP_NET_RAW";
-              CapabilityBoundingSet = "CAP_NET_RAW";
-              DynamicUser = true;
-              LockPersonality = true;
-              NoNewPrivileges = true;
-              PrivateDevices = true;
-              PrivateMounts = true;
-              PrivateTmp = true;
-              ProtectClock = true;
-              ProtectControlGroups = true;
+              AmbientCapabilities = "CAP_NET_ADMIN CAP_NET_RAW";
+              CapabilityBoundingSet = "CAP_NET_ADMIN CAP_NET_RAW";
+              DeviceAllow = "/dev/net/tun rw";
+              ProtectSystem = true;
               ProtectHome = true;
-              ProtectHostname = true;
-              ProtectKernelLogs = true;
-              ProtectKernelModules = true;
-              ProtectKernelTunables = true;
-              ProtectProc = "invisible";
-              ProtectSystem = "strict";
-              RemoveIPC = true;
-              RestrictNamespaces = true;
-              RestrictRealtime = true;
-              RestrictSUIDSGID = true;
-              SystemCallArchitectures = "native";
-              SystemCallFilter = "@system-service";
             }
             (mkIf (svcConfig.environmentFile != null) {
               EnvironmentFile = svcConfig.environmentFile;

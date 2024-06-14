@@ -3,6 +3,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
@@ -12,8 +13,9 @@ use pnet::datalink::{Channel, DataLinkReceiver};
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::Packet as PnetPacket;
 use pnet::util::MacAddr;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::EnvFilter;
+use tun_tap::{Iface, Mode};
 
 struct Peer {
     endpoint: SocketAddr,
@@ -31,17 +33,18 @@ fn interface_name() -> Result<String> {
     env::var("INTERFACE").or(Err(anyhow!("INTERFACE not specified")))
 }
 
-fn recv_local(tx: Sender<Packet>, mut rx: Box<dyn DataLinkReceiver>) {
+fn recv_local(tx: Sender<Packet>, iface: Arc<Iface>) {
     thread::spawn(move || {
-        fn handle(rx: &mut Box<dyn DataLinkReceiver>) -> Result<EthernetPacket<'static>> {
-            let data = rx.next().context("receive local packet")?;
-            let packet = EthernetPacket::owned(data.to_vec())
+        fn handle(iface: &Arc<Iface>) -> Result<EthernetPacket<'static>> {
+            let mut buf = vec![0; 2000];
+            let read = iface.recv(&mut buf).context("recv")?;
+            let packet = EthernetPacket::owned(buf[..read].to_vec())
                 .ok_or(anyhow!("malformed packet"))?;
             return Ok(packet);
         }
 
         loop {
-            match handle(&mut rx) {
+            match handle(&iface) {
                 Ok(packet) => tx.send(Packet::Local(packet)).unwrap(),
                 Err(err) => tx.send(Packet::Error(err)).unwrap()
             }
@@ -74,29 +77,22 @@ fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_str("qemu_network_server=trace").unwrap())
+        .with_env_filter(EnvFilter::from_str("qemu_network_server=debug").unwrap())
         .init();
 
     let interfaces = datalink::interfaces();
     // dbg!(interfaces);
 
     let interface_name = interface_name()?;
-    let interface = interfaces
-        .into_iter()
-        .find(|i| i.name == interface_name)
-        .ok_or(anyhow!("interface not found"))?;
-
-    let (mut local_tx, local_rx) = match datalink::channel(&interface, Default::default())
-        .context("open interface")? {
-        Channel::Ethernet(tx, rx) => (tx, rx),
-        _ => panic!("unknown channel type")
-    };
+    info!(interface_name);
+    let iface = Arc::new(Iface::without_packet_info(&interface_name, Mode::Tap)
+        .context("create tap interface")?);
 
     let socket = UdpSocket::bind("0.0.0.0:8889")
         .context("bind udp socket")?;
 
     let (tx, rx) = flume::bounded(0);
-    recv_local(tx.clone(), local_rx);
+    recv_local(tx.clone(), iface.clone());
     recv_remove(tx.clone(), socket.try_clone().context("clone socket")?);
 
     let mut peers = HashMap::<MacAddr, Peer>::new();
@@ -105,7 +101,6 @@ fn main() -> Result<()> {
         let packet = rx.recv().unwrap();
 
         if last_timeout.elapsed().as_secs() > 30 {
-            debug!("clear old peers");
             last_timeout = Instant::now();
             peers.retain(|_, p| p.last_activity.elapsed().as_secs() < 60);
         }
@@ -114,7 +109,9 @@ fn main() -> Result<()> {
             Packet::Remote(packet, addr) => {
                 trace!(?packet, ?addr, "IN");
 
-                local_tx.send_to(packet.packet(), None);
+                if let Err(err) = iface.send(packet.packet()) {
+                    warn!(?err, "send packet error");
+                }
 
                 if peers.insert(packet.get_source(), Peer {
                     endpoint: addr,
@@ -125,6 +122,8 @@ fn main() -> Result<()> {
                 }
             }
             Packet::Local(packet) => {
+                trace!(?packet, "OUT");
+
                 let peers: Vec<_> = if packet.get_destination().is_broadcast() {
                     peers.values().collect()
                 } else {
@@ -132,10 +131,6 @@ fn main() -> Result<()> {
                         .into_iter()
                         .collect()
                 };
-
-                if !peers.is_empty() {
-                    trace!(?packet, "OUT");
-                }
 
                 for p in peers {
                     if let Err(err) = socket.send_to(packet.packet(), p.endpoint) {

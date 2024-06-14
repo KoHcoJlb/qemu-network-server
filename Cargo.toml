@@ -8,5 +8,6 @@ anyhow = "1.0.86"
 pnet = "0.34.0"
 dotenvy = "0.15.7"
 flume = "0.11.0"
-tracing = { version = "0.1.40", features = ["release_max_level_debug"] }
+tracing = { version = "0.1.40" }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tun-tap = "0.1.4"
