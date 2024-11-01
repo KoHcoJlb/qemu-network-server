@@ -1,15 +1,12 @@
-use std::{env, thread};
-use std::any::Any;
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
+use std::{env, thread};
 
 use anyhow::{anyhow, Context, Result};
 use flume::Sender;
-use pnet::datalink;
-use pnet::datalink::{Channel, DataLinkReceiver};
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::Packet as PnetPacket;
 use pnet::util::MacAddr;
@@ -40,7 +37,7 @@ fn recv_local(tx: Sender<Packet>, iface: Arc<Iface>) {
             let read = iface.recv(&mut buf).context("recv")?;
             let packet = EthernetPacket::owned(buf[..read].to_vec())
                 .ok_or(anyhow!("malformed packet"))?;
-            return Ok(packet);
+            Ok(packet)
         }
 
         loop {
@@ -79,9 +76,6 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_str("qemu_network_server=debug").unwrap())
         .init();
-
-    let interfaces = datalink::interfaces();
-    // dbg!(interfaces);
 
     let interface_name = interface_name()?;
     info!(interface_name);

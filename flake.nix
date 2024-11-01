@@ -1,11 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs = { nixpkgs, crane, ... }:
@@ -16,17 +12,22 @@
       craneLib = crane.mkLib pkgs;
     in {
       default = pkgs.callPackage (
-        { openssl, pkg-config, rust, stdenv }:
+        { rust, stdenv }:
 
         craneLib.buildPackage ({
           src = craneLib.cleanCargoSource (craneLib.path ./.);
-
-          buildInputs = [ openssl ];
-          nativeBuildInputs = [ pkg-config ];
         } // (with rust.envVars; with stdenv; {
-          CARGO_BUILD_TARGET = rustHostPlatform;
-          "CARGO_TARGET_${hostPlatform.rust.cargoEnvVarTarget}_LINKER" = linkerForHost;
-          "CARGO_TARGET_${buildPlatform.rust.cargoEnvVarTarget}_LINKER" = linkerForBuild;
+          "CARGO_BUILD_TARGET" = rustHostPlatform;
+
+          "CC_${stdenv.buildPlatform.rust.cargoEnvVarTarget}" = ccForBuild;
+          "CXX_${stdenv.buildPlatform.rust.cargoEnvVarTarget}" = cxxForBuild;
+          "CARGO_TARGET_${stdenv.buildPlatform.rust.cargoEnvVarTarget}_LINKER" = ccForBuild;
+          "HOST_CC" = ccForBuild;
+          "HOST_CXX" = cxxForBuild;
+
+          "CC_${stdenv.hostPlatform.rust.cargoEnvVarTarget}" = ccForHost;
+          "CXX_${stdenv.hostPlatform.rust.cargoEnvVarTarget}" = cxxForHost;
+          "CARGO_TARGET_${stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = ccForHost;
         }))
       ) {};
     };
